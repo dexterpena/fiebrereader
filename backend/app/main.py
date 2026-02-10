@@ -1,0 +1,31 @@
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from app.config import settings
+from app.routes import auth, manga, reader, library, anilist
+
+app = FastAPI(title="LeerCapitulo Web", version="1.0.0")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        settings.frontend_url,
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+app.include_router(auth.router)
+app.include_router(manga.router)
+app.include_router(reader.router)
+app.include_router(library.router)
+app.include_router(anilist.router)
+
+
+@app.get("/api/health")
+async def health():
+    return {"status": "ok"}

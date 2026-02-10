@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useSearchParams, Navigate } from "react-router-dom";
+import { useSearchParams, Navigate, useNavigate } from "react-router-dom";
 import { api } from "../lib/api";
 import { useAuth } from "../contexts/AuthContext";
 
@@ -12,28 +12,40 @@ interface AnilistStatus {
 export default function Settings() {
   const { user, loading: authLoading } = useAuth();
   const [params] = useSearchParams();
+  const navigate = useNavigate();
   const [anilistStatus, setAnilistStatus] = useState<AnilistStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   // Handle Anilist OAuth callback
   useEffect(() => {
     const code = params.get("code");
     const isCallback = params.get("anilist_callback");
     if (code && isCallback && user) {
+      setError(null);
       api("/api/anilist/exchange-code", {
         method: "POST",
         body: JSON.stringify({ code }),
       })
-        .then(() => loadAnilistStatus())
-        .catch((err) => alert(`Anilist link failed: ${err.message}`));
+        .then(() => {
+          // Clean up URL params after successful exchange
+          navigate("/settings", { replace: true });
+          loadAnilistStatus();
+        })
+        .catch((err) => {
+          setError(`Anilist link failed: ${err.message}`);
+          navigate("/settings", { replace: true });
+        });
     }
-  }, [params, user]);
+  }, [params, user, navigate]);
 
   const loadAnilistStatus = async () => {
     try {
       const data = await api<AnilistStatus>("/api/anilist/status");
       setAnilistStatus(data);
+    } catch {
+      setAnilistStatus({ linked: false });
     } finally {
       setLoading(false);
     }
@@ -41,14 +53,20 @@ export default function Settings() {
 
   useEffect(() => {
     if (user) loadAnilistStatus();
+    else setLoading(false);
   }, [user]);
 
   if (authLoading) return <div className="loading">Loading...</div>;
   if (!user) return <Navigate to="/login" />;
 
   const linkAnilist = async () => {
-    const data = await api<{ url: string }>("/api/anilist/auth-url");
-    window.location.href = data.url;
+    setError(null);
+    try {
+      const data = await api<{ url: string }>("/api/anilist/auth-url");
+      window.location.href = data.url;
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Failed to start Anilist OAuth");
+    }
   };
 
   const unlinkAnilist = async () => {
@@ -58,11 +76,12 @@ export default function Settings() {
 
   const syncFromAnilist = async () => {
     setSyncing(true);
+    setError(null);
     try {
       const data = await api<{ entries: unknown[] }>("/api/anilist/manga-list");
       alert(`Fetched ${data.entries.length} entries from Anilist.`);
     } catch (err: unknown) {
-      alert(err instanceof Error ? err.message : "Sync failed");
+      setError(err instanceof Error ? err.message : "Sync failed");
     } finally {
       setSyncing(false);
     }
@@ -79,6 +98,7 @@ export default function Settings() {
       </section>
       <section className="settings-section">
         <h2>Anilist Integration</h2>
+        {error && <p className="error-msg" style={{ marginBottom: "0.75rem" }}>{error}</p>}
         {anilistStatus?.linked ? (
           <div>
             <p>

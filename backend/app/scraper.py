@@ -108,10 +108,24 @@ def _parse_manga_list(soup: BeautifulSoup) -> list[dict]:
             continue
         seen_urls.add(href)
 
-        # Look for thumbnail in parent element
-        parent = link.parent
-        img_tag = parent.find("img") if parent else None
-        thumbnail = _get_img_src(img_tag)
+        # Look for thumbnail: try inside the link, parent, grandparent, and
+        # preceding sibling <a> (covers are often in a separate image link)
+        thumbnail = ""
+        img_tag = link.find("img")
+        if not img_tag:
+            parent = link.parent
+            if parent:
+                img_tag = parent.find("img")
+            if not img_tag and parent and parent.parent:
+                img_tag = parent.parent.find("img")
+            # Also check preceding sibling <a> tags that might wrap an image
+            if not img_tag and parent:
+                for sib in parent.find_all("a"):
+                    img_tag = sib.find("img")
+                    if img_tag:
+                        break
+        if img_tag:
+            thumbnail = _get_img_src(img_tag)
 
         mangas.append({
             "url": href,
@@ -175,14 +189,25 @@ async def get_manga_detail(manga_url: str) -> dict:
     if title_el:
         title = title_el.get_text(strip=True) or title_el.get("content", "")
 
-    # Cover
-    cover_el = soup.select_one(
-        'img[src*="/covers/"], .cover img, .manga-cover img, meta[property="og:image"]'
-    )
+    # Cover — try several selectors in priority order
     cover = ""
-    if cover_el:
-        cover = cover_el.get("src") or cover_el.get("content") or ""
-        cover = _abs_url(cover)
+    for sel in [
+        'meta[property="og:image"]',
+        'img[src*="/covers/"]',
+        'img[src*="/uploads/"]',
+        ".cover img",
+        ".manga-cover img",
+        ".thumb img",
+        ".poster img",
+        "article img",
+        ".entry-content img",
+    ]:
+        cover_el = soup.select_one(sel)
+        if cover_el:
+            cover = cover_el.get("content") or cover_el.get("data-src") or cover_el.get("src") or ""
+            cover = _abs_url(cover.strip())
+            if cover:
+                break
 
     # Author
     author_el = soup.select_one(

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useSearchParams } from "react-router-dom";
 import { api, imageProxyUrl } from "../lib/api";
 import { useAuth } from "../contexts/AuthContext";
@@ -31,6 +31,7 @@ export default function MangaDetail() {
   const [chapters, setChapters] = useState<Chapter[]>([]);
   const [inLibrary, setInLibrary] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [coverError, setCoverError] = useState(false);
 
   useEffect(() => {
     if (!mangaUrl) return;
@@ -82,11 +83,18 @@ export default function MangaDetail() {
   return (
     <div className="manga-detail">
       <div className="manga-detail-header">
-        <img
-          src={manga.cover ? imageProxyUrl(manga.cover) : "/placeholder.svg"}
-          alt={manga.title}
-          className="manga-detail-cover"
-        />
+        {manga.cover && !coverError ? (
+          <img
+            src={imageProxyUrl(manga.cover)}
+            alt={manga.title}
+            className="manga-detail-cover"
+            onError={() => setCoverError(true)}
+          />
+        ) : (
+          <div className="manga-detail-cover manga-cover-placeholder">
+            {manga.title.charAt(0)}
+          </div>
+        )}
         <div className="manga-detail-info">
           <h1>{manga.title}</h1>
           {manga.author && <p><strong>Author:</strong> {manga.author}</p>}

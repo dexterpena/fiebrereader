@@ -10,6 +10,13 @@ router = APIRouter(prefix="/api/anilist", tags=["anilist"])
 @router.get("/auth-url")
 async def get_auth_url(user=Depends(get_current_user)):
     """Return the Anilist OAuth URL to redirect the user to."""
+    from app.config import settings as cfg
+
+    if not cfg.anilist_client_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Anilist integration is not configured. Set ANILIST_CLIENT_ID and ANILIST_CLIENT_SECRET in backend .env",
+        )
     return {"url": anilist.get_authorize_url()}
 
 

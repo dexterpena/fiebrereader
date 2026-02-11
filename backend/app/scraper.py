@@ -176,35 +176,53 @@ async def get_latest(page: int = 1) -> dict:
 
 
 async def search_manga(query: str, page: int = 1) -> dict:
-    """Search for manga by title. The site does client-side filtering, so we
-    fetch the full list and filter by title match ourselves."""
-    encoded = quote(query)
-    soup = await _fetch(f"{BASE_URL}/?q={encoded}&page={page}")
-    all_mangas = _parse_manga_list(soup)
+    """Search for manga using the site's autocomplete JSON endpoint."""
+    async with httpx.AsyncClient(headers=HEADERS, follow_redirects=True, timeout=30) as client:
+        resp = await client.get(
+            f"{BASE_URL}/search-autocomplete",
+            params={"term": query},
+        )
+        resp.raise_for_status()
+        results = resp.json()
 
-    # Filter by query (case-insensitive substring match)
-    query_lower = query.lower()
-    mangas = [m for m in all_mangas if query_lower in m["title"].lower()]
+    mangas = []
+    for item in results:
+        link = item.get("link", "")
+        thumbnail = item.get("thumbnail", "")
+        mangas.append({
+            "url": link,
+            "title": _clean_title(item.get("label", item.get("value", ""))),
+            "thumbnail": _abs_url(thumbnail) if thumbnail else "",
+        })
 
-    has_next = soup.select_one(
-        f"a[href*='page={page + 1}'], a.next, a[rel='next']"
-    ) is not None
-
-    return {"mangas": mangas, "page": page, "has_next": has_next}
+    return {"mangas": mangas, "page": page, "has_next": False}
 
 
 async def get_manga_detail(manga_url: str) -> dict:
-    """Fetch full manga details from a manga page URL."""
+    """Fetch full manga details from a manga page URL.
+
+    The site stores manga metadata inside ``p.description-update`` within
+    ``div.media-body``.  The HTML looks like::
+
+        <p class="description-update">
+          <span>Títulos Alternativos: </span>alt1, alt2<br/>
+          <span>Géneros: </span><a>G1</a>, <a>G2</a><br/>
+          <span>Escribe: Manga</span><br/>
+          <span>Estado: </span>Ongoing<br/>
+        </p>
+
+    We parse each ``<span>`` label to extract the structured fields.
+    """
     url = _abs_url(manga_url)
     soup = await _fetch(url)
 
-    # Title
-    title_el = soup.select_one("h1, .manga-title, meta[property='og:title']")
+    # --- Title ---
+    title_el = soup.select_one("h1.title-manga, h1, meta[property='og:title']")
     title = ""
     if title_el:
         title = _clean_title(title_el.get_text(strip=True) or title_el.get("content", ""))
 
-    # Cover — try several selectors in priority order
+    # --- Cover ---
     cover = ""
     for sel in [
         'meta[property="og:image"]',
@@ -224,56 +242,101 @@ async def get_manga_detail(manga_url: str) -> dict:
             if cover:
                 break
 
-    # Author
-    author_el = soup.select_one(
-        ".author, .autor, span:-soup-contains('Autor') + span, dt:-soup-contains('Autor') + dd"
-    )
-    author = author_el.get_text(strip=True) if author_el else None
+    # --- Parse p.description-update for structured metadata ---
+    alt_titles = ""
+    genres: list[str] = []
+    manga_type = ""
+    status = "unknown"
+    author = None
+    artist = None
 
-    # Artist
-    artist_el = soup.select_one(
-        ".artist, .artista, span:-soup-contains('Artista') + span, dt:-soup-contains('Artista') + dd"
-    )
-    artist = artist_el.get_text(strip=True) if artist_el else None
+    info_block = soup.select_one("p.description-update")
+    if info_block:
+        # Extract genre links specifically from this block (not the sidebar)
+        genre_links = info_block.select('a[href*="/genre/"]')
+        genres = [a.get_text(strip=True) for a in genre_links if a.get_text(strip=True)]
 
-    # Description
-    desc_el = soup.select_one(
-        ".synopsis, .sinopsis, .description, .descripcion, div.manga-desc, p.summary"
-    )
-    description = desc_el.get_text(strip=True) if desc_el else None
+        # Walk through <span> labels to find structured fields
+        for span in info_block.select("span"):
+            label = span.get_text(strip=True).lower()
+
+            if "alternativos" in label or "alternative" in label:
+                # Text after span until <br>
+                val_parts = []
+                for sib in span.next_siblings:
+                    if getattr(sib, "name", None) == "br":
+                        break
+                    text = sib.get_text(strip=True) if hasattr(sib, "get_text") else str(sib).strip()
+                    if text:
+                        val_parts.append(text)
+                alt_titles = " ".join(val_parts).strip().strip(",").strip()
+
+            elif "género" in label or "genero" in label or "genres" in label:
+                # Genres are already captured via links above
+                pass
+
+            elif "escribe" in label or "tipo" in label or "type" in label:
+                # May be inline: "Escribe: Manga"
+                text = span.get_text(strip=True)
+                # Extract value after colon
+                if ":" in text:
+                    manga_type = text.split(":", 1)[1].strip()
+                else:
+                    # Value in next sibling
+                    nxt = span.next_sibling
+                    if nxt:
+                        manga_type = (nxt.get_text(strip=True) if hasattr(nxt, "get_text") else str(nxt).strip())
+
+            elif "estado" in label or "status" in label:
+                # Value in next sibling text
+                val_parts = []
+                for sib in span.next_siblings:
+                    if getattr(sib, "name", None) == "br":
+                        break
+                    text = sib.get_text(strip=True) if hasattr(sib, "get_text") else str(sib).strip()
+                    if text:
+                        val_parts.append(text)
+                status_text = " ".join(val_parts).strip().lower()
+                if any(s in status_text for s in ("ongoing", "publicándose", "en curso")):
+                    status = "Ongoing"
+                elif any(s in status_text for s in ("completed", "finalizado", "completado")):
+                    status = "Completed"
+                elif status_text:
+                    status = status_text.capitalize()
+
+            elif "autor" in label or "author" in label:
+                val_parts = []
+                for sib in span.next_siblings:
+                    if getattr(sib, "name", None) == "br":
+                        break
+                    text = sib.get_text(strip=True) if hasattr(sib, "get_text") else str(sib).strip()
+                    if text:
+                        val_parts.append(text)
+                author = " ".join(val_parts).strip() or None
+
+            elif "artista" in label or "artist" in label:
+                val_parts = []
+                for sib in span.next_siblings:
+                    if getattr(sib, "name", None) == "br":
+                        break
+                    text = sib.get_text(strip=True) if hasattr(sib, "get_text") else str(sib).strip()
+                    if text:
+                        val_parts.append(text)
+                artist = " ".join(val_parts).strip() or None
+
+    # --- Synopsis: text under "Sinopsis" heading ---
+    description = None
+    sinopsis_h = soup.find(["h2", "h3"], string=lambda t: "sinopsis" in t.lower() if t else False)
+    if sinopsis_h:
+        nxt = sinopsis_h.find_next(["p", "div"])
+        if nxt:
+            description = nxt.get_text(strip=True)
     if not description:
         for p in soup.select("p"):
             text = p.get_text(strip=True)
-            if len(text) > 100:
+            if len(text) > 100 and "alternativos" not in text.lower():
                 description = text
                 break
-
-    # Genres — filter out non-genre categories (status labels, types, etc.)
-    NON_GENRE_WORDS = {
-        "manga", "manhwa", "manhua", "novel", "one shot", "oneshot",
-        "ongoing", "completed", "hiatus", "cancelled", "en curso",
-        "finalizado", "publicándose", "cancelado",
-    }
-    genre_els = soup.select(
-        '.genres a, .generos a, span.genre, a[href*="genero"], a[href*="genre"]'
-    )
-    genres = [g.get_text(strip=True) for g in genre_els if g.get_text(strip=True)]
-    if not genres:
-        genre_els = soup.select('a[href*="Action"], a[href*="Adventure"], a[href*="Comedy"]')
-        genres = [g.get_text(strip=True) for g in genre_els]
-    genres = [g for g in genres if g.lower() not in NON_GENRE_WORDS]
-
-    # Status
-    status_el = soup.select_one(
-        ".status, .estado, span:-soup-contains('Estado') + span, dt:-soup-contains('Estado') + dd"
-    )
-    status = "unknown"
-    if status_el:
-        status_text = status_el.get_text(strip=True).lower()
-        if any(s in status_text for s in ("ongoing", "publicándose", "en curso")):
-            status = "ongoing"
-        elif any(s in status_text for s in ("completed", "finalizado", "completado")):
-            status = "completed"
 
     return {
         "url": manga_url,
@@ -284,6 +347,8 @@ async def get_manga_detail(manga_url: str) -> dict:
         "description": description,
         "genres": genres,
         "status": status,
+        "alt_titles": alt_titles,
+        "manga_type": manga_type,
     }
 
 

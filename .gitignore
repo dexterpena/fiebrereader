@@ -19,6 +19,9 @@ frontend/dist/
 .idea/
 *.swp
 
+# Supabase
+supabase/.temp/
+
 # OS
 .DS_Store
 Thumbs.db

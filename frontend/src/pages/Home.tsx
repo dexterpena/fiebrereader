@@ -22,6 +22,7 @@ export default function Home() {
         setPopular(pop.mangas);
         setLatest(lat.mangas);
       })
+      .catch((err) => console.error("Home fetch error:", err))
       .finally(() => setLoading(false));
   }, []);
 

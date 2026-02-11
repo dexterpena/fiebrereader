@@ -24,9 +24,10 @@ export default function Settings() {
     const isCallback = params.get("anilist_callback");
     if (code && isCallback && user) {
       setError(null);
+      const redirectUri = `${window.location.origin}/settings?anilist_callback=true`;
       api("/api/anilist/exchange-code", {
         method: "POST",
-        body: JSON.stringify({ code }),
+        body: JSON.stringify({ code, redirect_uri: redirectUri }),
       })
         .then(() => {
           // Clean up URL params after successful exchange
@@ -62,7 +63,10 @@ export default function Settings() {
   const linkAnilist = async () => {
     setError(null);
     try {
-      const data = await api<{ url: string }>("/api/anilist/auth-url");
+      const redirectUri = `${window.location.origin}/settings?anilist_callback=true`;
+      const data = await api<{ url: string }>(
+        `/api/anilist/auth-url?redirect_uri=${encodeURIComponent(redirectUri)}`
+      );
       window.location.href = data.url;
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Failed to start Anilist OAuth");
@@ -78,10 +82,18 @@ export default function Settings() {
     setSyncing(true);
     setError(null);
     try {
-      const data = await api<{ entries: unknown[] }>("/api/anilist/manga-list");
-      alert(`Fetched ${data.entries.length} entries from Anilist.`);
+      const data = await api<{
+        imported: number;
+        not_found: number;
+        not_found_titles: string[];
+      }>("/api/anilist/import", { method: "POST" });
+      let msg = `Imported ${data.imported} manga into your library.`;
+      if (data.not_found > 0) {
+        msg += `\n${data.not_found} not found on LeerCapitulo:\n${data.not_found_titles.join(", ")}`;
+      }
+      alert(msg);
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Sync failed");
+      setError(err instanceof Error ? err.message : "Import failed");
     } finally {
       setSyncing(false);
     }

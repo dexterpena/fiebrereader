@@ -1,10 +1,17 @@
-const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
+import { supabase } from "./supabase";
+
+const API_BASE =
+  import.meta.env.VITE_API_URL ||
+  `${window.location.protocol}//${window.location.hostname}:8000`;
 
 export async function api<T = unknown>(
   path: string,
   options: RequestInit = {}
 ): Promise<T> {
-  const token = localStorage.getItem("access_token");
+  // Always get the fresh token from Supabase session
+  const { data } = await supabase.auth.getSession();
+  const token = data.session?.access_token;
+
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     ...(options.headers as Record<string, string>),

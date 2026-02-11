@@ -2,6 +2,8 @@
 Anilist API client — OAuth2 + GraphQL for manga tracking.
 """
 
+from urllib.parse import quote
+
 import httpx
 from app.config import settings
 
@@ -10,18 +12,20 @@ ANILIST_TOKEN_URL = "https://anilist.co/api/v2/oauth/token"
 GRAPHQL_URL = "https://graphql.anilist.co"
 
 
-def get_authorize_url() -> str:
+def get_authorize_url(redirect_uri: str | None = None) -> str:
     """Return the URL to redirect users to for Anilist OAuth."""
+    uri = redirect_uri or settings.anilist_redirect_uri
     return (
         f"{ANILIST_AUTH_URL}"
         f"?client_id={settings.anilist_client_id}"
-        f"&redirect_uri={settings.anilist_redirect_uri}"
+        f"&redirect_uri={quote(uri, safe='')}"
         f"&response_type=code"
     )
 
 
-async def exchange_code(code: str) -> dict:
+async def exchange_code(code: str, redirect_uri: str | None = None) -> dict:
     """Exchange an authorization code for an access token."""
+    uri = redirect_uri or settings.anilist_redirect_uri
     async with httpx.AsyncClient(timeout=30) as client:
         resp = await client.post(
             ANILIST_TOKEN_URL,
@@ -29,7 +33,7 @@ async def exchange_code(code: str) -> dict:
                 "grant_type": "authorization_code",
                 "client_id": settings.anilist_client_id,
                 "client_secret": settings.anilist_client_secret,
-                "redirect_uri": settings.anilist_redirect_uri,
+                "redirect_uri": uri,
                 "code": code,
             },
             headers={"Accept": "application/json"},

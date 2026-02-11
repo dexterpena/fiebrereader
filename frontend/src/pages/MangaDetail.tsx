@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { api, imageProxyUrl } from "../lib/api";
 import { useAuth } from "../contexts/AuthContext";
@@ -13,6 +13,8 @@ interface MangaInfo {
   description: string | null;
   genres: string[];
   status: string;
+  alt_titles: string | null;
+  manga_type: string | null;
 }
 
 interface Chapter {
@@ -56,6 +58,7 @@ export default function MangaDetail() {
   const toggleLibrary = async () => {
     if (!manga) return;
     if (inLibrary) {
+      if (!confirm("Remove this manga from your library?")) return;
       const data = await api<{ entries: { id: string; manga_url: string }[] }>(
         "/api/library"
       );
@@ -97,19 +100,22 @@ export default function MangaDetail() {
         )}
         <div className="manga-detail-info">
           <h1>{manga.title}</h1>
+          {manga.alt_titles && (
+            <p><strong>Alt Titles:</strong> {manga.alt_titles}</p>
+          )}
+          {manga.genres.length > 0 && (
+            <p><strong>Genres:</strong> {manga.genres.join(", ")}</p>
+          )}
+          {manga.manga_type && (
+            <p><strong>Type:</strong> {manga.manga_type}</p>
+          )}
+          <p><strong>Status:</strong> {manga.status}</p>
           {manga.author && <p><strong>Author:</strong> {manga.author}</p>}
           {manga.artist && <p><strong>Artist:</strong> {manga.artist}</p>}
-          <p><strong>Status:</strong> {manga.status}</p>
-          {manga.genres.length > 0 && (
-            <div className="genres">
-              {manga.genres.map((g, i) => (
-                <span key={i} className="genre-tag">{g}</span>
-              ))}
-            </div>
-          )}
           {manga.description && <p className="description">{manga.description}</p>}
           {user && (
-            <button onClick={toggleLibrary} className="btn">
+            <button onClick={toggleLibrary} className="btn" style={{ marginTop: "0.75rem" }}>
+              <i className={`fa-solid ${inLibrary ? "fa-heart-circle-minus" : "fa-heart-circle-plus"}`} />
               {inLibrary ? "Remove from Library" : "Add to Library"}
             </button>
           )}

@@ -28,11 +28,19 @@ export default function ChapterList({ chapters, mangaUrl }: Props) {
   // Load chapter statuses if logged in
   useEffect(() => {
     if (!user || !mangaUrl) return;
-    api<{ statuses: ChapterStatusMap }>(
-      `/api/chapters/status?manga_url=${encodeURIComponent(mangaUrl)}`
-    )
-      .then((data) => setStatuses(data.statuses))
-      .catch(() => {});
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const data = await api<{ statuses: ChapterStatusMap }>(
+          `/api/chapters/status?manga_url=${encodeURIComponent(mangaUrl)}`
+        );
+        if (!cancelled) setStatuses(data.statuses);
+      } catch (err) {
+        console.error("Failed to load chapter statuses:", err);
+      }
+    };
+    load();
+    return () => { cancelled = true; };
   }, [user, mangaUrl]);
 
   const filtered = useMemo(() => {
@@ -61,8 +69,8 @@ export default function ChapterList({ chapters, mangaUrl }: Props) {
     }));
     await api("/api/chapters/mark-read", {
       method: "POST",
-      body: JSON.stringify({ manga_url: mangaUrl, chapter_url: ch.url, is_read: newVal }),
-    }).catch(() => {});
+      body: JSON.stringify({ manga_url: mangaUrl, chapter_url: ch.url, chapter_number: ch.chapter_number, is_read: newVal }),
+    }).catch((err) => console.error("Failed to save read status:", err));
   };
 
   const toggleBookmark = async (ch: Chapter) => {
@@ -75,26 +83,34 @@ export default function ChapterList({ chapters, mangaUrl }: Props) {
     await api("/api/chapters/bookmark", {
       method: "POST",
       body: JSON.stringify({ manga_url: mangaUrl, chapter_url: ch.url, is_bookmarked: newVal }),
-    }).catch(() => {});
+    }).catch((err) => console.error("Failed to save bookmark:", err));
   };
 
-  const markPreviousRead = async (ch: Chapter) => {
-    // Find all chapters with lower or equal chapter number
+  const togglePreviousRead = async (ch: Chapter) => {
     const urls = chapters
-      .filter((c) => c.chapter_number <= ch.chapter_number)
+      .filter((c) => c.chapter_number < ch.chapter_number)
       .map((c) => c.url);
+    if (urls.length === 0) return;
+    // Check if all previous are already read
+    const allRead = urls.every((url) => statuses[url]?.is_read);
+    const newVal = !allRead;
     // Optimistic update
     setStatuses((prev) => {
       const next = { ...prev };
       for (const url of urls) {
-        next[url] = { ...next[url], is_read: true, is_bookmarked: next[url]?.is_bookmarked || false };
+        next[url] = { ...next[url], is_read: newVal, is_bookmarked: next[url]?.is_bookmarked || false };
       }
       return next;
     });
+    // The max chapter number is the one just below the clicked chapter
+    const prevChapters = chapters.filter((c) => c.chapter_number < ch.chapter_number);
+    const maxChapterNum = prevChapters.length > 0
+      ? Math.max(...prevChapters.map((c) => c.chapter_number))
+      : 0;
     await api("/api/chapters/mark-previous-read", {
       method: "POST",
-      body: JSON.stringify({ manga_url: mangaUrl, chapter_urls: urls }),
-    }).catch(() => {});
+      body: JSON.stringify({ manga_url: mangaUrl, chapter_urls: urls, max_chapter_number: maxChapterNum, is_read: newVal }),
+    }).catch((err) => console.error("Failed to mark previous:", err));
   };
 
   return (
@@ -114,7 +130,8 @@ export default function ChapterList({ chapters, mangaUrl }: Props) {
             onClick={() => setSortDesc((p) => !p)}
             title={sortDesc ? "Sorted descending" : "Sorted ascending"}
           >
-            {sortDesc ? "\u2193 Newest" : "\u2191 Oldest"}
+            <i className={`fa-solid ${sortDesc ? "fa-arrow-down-wide-short" : "fa-arrow-up-wide-short"}`} />
+            {sortDesc ? " Newest" : " Oldest"}
           </button>
         </div>
       </div>
@@ -146,21 +163,21 @@ export default function ChapterList({ chapters, mangaUrl }: Props) {
                         onClick={() => toggleRead(ch)}
                         title={isRead ? "Mark as unread" : "Mark as read"}
                       >
-                        {isRead ? "\u2714" : "\u25CB"}
+                        <i className={`fa-solid ${isRead ? "fa-circle-check" : "fa-circle"}`} />
                       </button>
                       <button
                         className={`btn-icon${isBookmarked ? " active" : ""}`}
                         onClick={() => toggleBookmark(ch)}
                         title={isBookmarked ? "Remove bookmark" : "Bookmark"}
                       >
-                        {isBookmarked ? "\u2605" : "\u2606"}
+                        <i className={`fa-solid ${isBookmarked ? "fa-bookmark" : "fa-bookmark"}`} style={isBookmarked ? undefined : { opacity: 0.5 }} />
                       </button>
                       <button
                         className="btn-icon"
-                        onClick={() => markPreviousRead(ch)}
-                        title="Mark all previous as read"
+                        onClick={() => togglePreviousRead(ch)}
+                        title="Toggle all previous as read"
                       >
-                        \u21E7
+                        <i className="fa-solid fa-backward" />
                       </button>
                     </div>
                   )}

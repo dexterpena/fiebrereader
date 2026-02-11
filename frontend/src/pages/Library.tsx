@@ -20,6 +20,21 @@ const STATUS_LABELS: Record<string, string> = {
   dropped: "Dropped",
 };
 
+const TITLE_SUFFIXES = [
+  " - Read Manga Online leercapitulo.co",
+  " - Leer Manga Online leercapitulo.co",
+  " - leercapitulo.co",
+];
+
+function cleanTitle(title: string): string {
+  for (const suffix of TITLE_SUFFIXES) {
+    if (title.endsWith(suffix)) {
+      return title.slice(0, -suffix.length).trim();
+    }
+  }
+  return title;
+}
+
 export default function Library() {
   const { user, loading: authLoading } = useAuth();
   const [entries, setEntries] = useState<LibraryEntry[]>([]);
@@ -50,6 +65,7 @@ export default function Library() {
   };
 
   const removeEntry = async (id: string) => {
+    if (!confirm("Remove this manga from your library?")) return;
     await api(`/api/library/${id}`, { method: "DELETE" });
     setEntries((prev) => prev.filter((e) => e.id !== id));
   };
@@ -95,9 +111,13 @@ export default function Library() {
               </Link>
               <div className="library-item-info">
                 <Link to={`/manga?url=${encodeURIComponent(entry.manga_url)}`}>
-                  <h3>{entry.manga_title}</h3>
+                  <h3>{cleanTitle(entry.manga_title)}</h3>
                 </Link>
-                <p>Chapter {entry.current_chapter}</p>
+                <p>
+                  {entry.current_chapter > 0
+                    ? `Progress: Ch. ${entry.current_chapter}`
+                    : "Not started"}
+                </p>
                 <select
                   value={entry.status}
                   onChange={(e) => updateStatus(entry.id, e.target.value)}

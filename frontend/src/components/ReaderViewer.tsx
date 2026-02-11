@@ -45,7 +45,7 @@ export default function ReaderViewer({ images, onPageChange }: Props) {
       </div>
       <div className="reader-controls">
         <button onClick={prev} disabled={currentPage === 0}>
-          Prev
+          <i className="fa-solid fa-chevron-left" /> Prev
         </button>
         <select
           className="reader-page-select"
@@ -62,7 +62,7 @@ export default function ReaderViewer({ images, onPageChange }: Props) {
           {currentPage + 1} / {images.length}
         </span>
         <button onClick={next} disabled={currentPage === images.length - 1}>
-          Next
+          Next <i className="fa-solid fa-chevron-right" />
         </button>
       </div>
     </div>

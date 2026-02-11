@@ -1,8 +1,22 @@
 import { supabase } from "./supabase";
 
-const API_BASE =
-  import.meta.env.VITE_API_URL ||
-  `${window.location.protocol}//${window.location.hostname}:8000`;
+// Prefer a relative API base so the frontend works behind any host/proxy.
+// If VITE_API_URL is provided, use it (e.g. "https://example.com/api").
+// Strip a trailing slash to avoid double slashes when joining paths.
+const API_BASE = (import.meta.env.VITE_API_URL || "/api").replace(/\/$/, "");
+
+function buildApiUrl(path: string): string {
+  // Allow callers to pass paths with or without an "/api" prefix.
+  const withoutApiPrefix = path.startsWith("/api")
+    ? path.slice("/api".length)
+    : path;
+
+  const normalizedPath = withoutApiPrefix.startsWith("/")
+    ? withoutApiPrefix
+    : `/${withoutApiPrefix}`;
+
+  return `${API_BASE}${normalizedPath}`;
+}
 
 export async function api<T = unknown>(
   path: string,
@@ -20,7 +34,7 @@ export async function api<T = unknown>(
     headers["Authorization"] = `Bearer ${token}`;
   }
 
-  const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
+  const res = await fetch(buildApiUrl(path), { ...options, headers });
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({ detail: res.statusText }));
@@ -31,9 +45,13 @@ export async function api<T = unknown>(
 }
 
 export function imageProxyUrl(url: string): string {
-  return `${API_BASE}/api/reader/image-proxy?url=${encodeURIComponent(url)}`;
+  return buildApiUrl(
+    `/api/reader/image-proxy?url=${encodeURIComponent(url)}`
+  );
 }
 
 export function pdfDownloadUrl(chapterUrl: string): string {
-  return `${API_BASE}/api/reader/download-pdf?url=${encodeURIComponent(chapterUrl)}`;
+  return buildApiUrl(
+    `/api/reader/download-pdf?url=${encodeURIComponent(chapterUrl)}`
+  );
 }

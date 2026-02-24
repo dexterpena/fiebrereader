@@ -1,6 +1,8 @@
 services:
   backend:
     build: ./backend
+    labels:
+      - "com.centurylinklabs.watchtower.enable=false"
     expose:
       - "8000"
     environment:
